@@ -1,6 +1,6 @@
 # 电子书阅读器 · 技术方案 v0.1
 
-> 状态：已评审 · 实现中｜对应 `docs/PRD.md` v0.1｜更新：2026-11-09｜范围：TXT MVP
+> 状态：已实现 · v0.1 已交付｜对应 `docs/PRD.md` v0.1｜更新：2026-11-09｜范围：TXT MVP
 > 本文只回答「怎么实现」。需求、范围与验收以 PRD 为准；两者冲突时以 PRD 为准。
 
 ## 1. 结论与决策记录
@@ -208,7 +208,7 @@ npm run build                             # 产出单文件 HTML
 | M1 解析层 | `types.ts` + `txtParser.ts` + Vitest 解析器单测 | 3 本真实 TXT 无乱码、段落可读 |
 | M2 阅读层 | `ReaderView` + 设置 + 分块渲染 | 字号/行距/主题即时生效且重启保留 |
 | M3 进度与跳转 | `offsetIndex` + `progress` + 跳转 | 刷新恢复误差 < 1 屏、50% 跳转正确 |
-| M4 验收 | 假解析器注入测试 + 手工清单 | PRD §5.4 五条全达标、两栈测试全绿、工作区干净 |
+| M4 验收 | 假解析器注入测试 + 自动化 E2E + `docs/ACCEPTANCE.md` | ✅ 已完成：PRD §5.4 五条全达标、两栈测试与 E2E 全绿、工作区干净 |
 
 ## 10. 风险与对策
 
@@ -230,4 +230,4 @@ npm run build                             # 产出单文件 HTML
 
 ## 12. 交付约定
 
-遵守仓库 `AGENTS.MD`：每次改动创建一个对应 Git commit；每次改动编写或更新相关测试，交付前确保全部通过。本次交付物为本文档与 `tests/test_tech_design.py`；实现阶段按 M1~M4 交付源码、Vitest 单测、E2E 脚本与单文件 HTML 产物。
+遵守仓库 `AGENTS.MD`：每次改动创建一个对应 Git commit；每次改动编写或更新相关测试，交付前确保全部通过。本次交付物为本文档与 `tests/test_tech_design.py`。M1~M4 已交付：源码、Vitest 单测、E2E 脚本、单文件 HTML 产物（`release/index.html`）与 `docs/ACCEPTANCE.md` 验收记录。

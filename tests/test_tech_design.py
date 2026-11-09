@@ -87,6 +87,11 @@ class TestTechDesign(unittest.TestCase):
             with self.subTest(keyword=keyword):
                 self.assertIn(keyword, self.text)
 
+    def test_delivery_state_documented(self):
+        for keyword in ["已实现", "ACCEPTANCE.md", "npm run test:e2e"]:
+            with self.subTest(keyword=keyword):
+                self.assertIn(keyword, self.text)
+
     def test_aligned_with_prd(self):
         self.assertTrue(PRD.is_file(), "技术方案必须对应已有的 docs/PRD.md")
         self.assertIn("v0.1", self.text)
