@@ -5,3 +5,10 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Node 前端工程
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.vite/
