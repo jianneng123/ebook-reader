@@ -77,6 +77,16 @@ class TestTechDesign(unittest.TestCase):
         self.assertIn("编码切换后旧字符偏移会漂移", self.text)
         self.assertIn("2 MB", self.text)
 
+    def test_validation_paths_documented(self):
+        """M0 实测结论必须落进方案，避免后续误用无法走 file:// 的自动化通道。"""
+        for keyword in [
+            "Chrome headless", "http://127.0.0.1", "setInputFiles",
+            'Access to "file:" protocol is blocked', "npm run test:e2e",
+            "M0 实测结论", "自动化 E2E",
+        ]:
+            with self.subTest(keyword=keyword):
+                self.assertIn(keyword, self.text)
+
     def test_aligned_with_prd(self):
         self.assertTrue(PRD.is_file(), "技术方案必须对应已有的 docs/PRD.md")
         self.assertIn("v0.1", self.text)

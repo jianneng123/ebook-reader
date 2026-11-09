@@ -1,6 +1,6 @@
 # 电子书阅读器 · 技术方案 v0.1
 
-> 状态：待评审｜对应 `docs/PRD.md` v0.1｜更新：2026-11-09｜范围：TXT MVP
+> 状态：已评审 · 实现中｜对应 `docs/PRD.md` v0.1｜更新：2026-11-09｜范围：TXT MVP
 > 本文只回答「怎么实现」。需求、范围与验收以 PRD 为准；两者冲突时以 PRD 为准。
 
 ## 1. 结论与决策记录
@@ -168,8 +168,16 @@ type StoredProgress = { version: 1; books: Record<string, Progress> }
 | 读取 | `try/catch` + schema 校验，损坏回默认值，禁止白屏 |
 | 主交付路径 | `vite-plugin-singlefile` 打成单个 `index.html`，`file://` 双击即用 |
 | 开发期 | `vite dev` 或 `python -m http.server` |
+| **离线产物验证** | 本机 Chrome `--headless=new --dump-dom "file:///..."` 单次模式（M0 实测通过✅） |
+| **交互 E2E** | 起 `http://127.0.0.1` 本地静态服务 + Playwright `setInputFiles` 注入真实 TXT，覆盖 F1~F6 |
 
-⚠️ **离线唯一真坑**：`file://` 直开多文件 Vite 产物时，ES module 受 CORS 策略拦截会加载失败。因此单文件产物是主路径，不是可选项。M0 探针需实测验证🔍。
+⚠️ **离线唯一真坑**：`file://` 直开多文件 Vite 产物时，ES module 受 CORS 策略拦截会加载失败。因此单文件产物是主路径，不是可选项。
+
+**M0 实测结论（2026-11-09，已闭环）**：
+- ✅ 本机 Chrome `chrome.exe --headless=new --dump-dom "file:///..."` 成功读到本地页面 DOM → 单文件 `file://` 交付路径成立。
+- ❌ `playwright-cli open file://...` 报 `Access to "file:" protocol is blocked`；内置 WorkBuddy 浏览器的 `tabs_new` / `tab_goto` 把 URL 限制为 `^https?://` → **两者都不能用于验证 `file://` 产物**。
+- ✅ 可行组合：交互验证一律走本地 `http://127.0.0.1` 服务（Playwright 用 `setInputFiles` 绕开原生文件选择框），离线产物验证走 Chrome 单次无头模式。
+- 结论：ADR-001 / ADR-004 无需复议，**不引入桌面 computer use，也不安装 Chrome 扩展**（扩展只解决复用登录态，与本地产物验证无关）。
 
 ## 8. 测试策略（映射 PRD §5.4）
 
@@ -180,20 +188,23 @@ type StoredProgress = { version: 1; books: Record<string, Progress> }
 | 偏移映射 | Vitest | offset ↔ (段落, 段内偏移) 往返、0 / 末位 / 超界、50% |
 | 进度与设置 | Vitest | 写入读取、损坏兜底、编码切换重置 |
 | 文档与仓库约定 | Python unittest | 现有 10 项 + 本文配套校验 |
-| §5.4-1/2/3 | 手工 E2E | 3 本真实中文 TXT（含 1 本 GBK）、刷新重开误差 < 1 屏、设置重启保留 |
+| §5.4-1/2/3 | 自动化 E2E | 本地 http 服务 + Playwright：3 本真实中文 TXT（含 1 本 GBK）、刷新重开误差 < 1 屏、设置重启保留、50% 跳转 |
+| 离线产物 | Chrome headless | `--dump-dom` 验单文件 `file://` 直开能渲染，无 ES module / CORS 报错 |
 
 ```bash
-python -m unittest discover -s tests -v   # 仓库约定层：当前可执行
-npm test                                  # vitest run，脚手架建立后启用（当前未建立，不可运行）
+python -m unittest discover -s tests -v   # 仓库约定层
+npm test                                  # vitest run，应用层单测
+npm run test:e2e                          # Playwright 交互 E2E + Chrome headless 离线产物校验
+npm run build                             # 产出单文件 HTML
 ```
 
-**交付判定**：两条命令全绿 + `git status` 干净 + 每个改动均有对应 commit。当前阶段只有第一条命令可运行，Vitest 随 M1 脚手架一起落地，不把未建立的命令写成「已验证」。
+**交付判定**：两条命令全绿（Python unittest + Vitest）+ E2E 脚本通过 + `git status` 干净 + 每个改动均有对应 commit。E2E 与单文件产物随实现一起落地，不把未建立的命令写成「已验证」。
 
 ## 9. 里程碑
 
 | 阶段 | 产出 | 退出条件 |
 |---|---|---|
-| M0 探针 | 最小验证页：真实 GBK TXT 拖入 → 解码 → 存偏移 → 刷新恢复，并验单文件 `file://` 直开 | 通过则确认 ADR-001；不通过则复议技术选型 |
+| M0 探针 | 验证 `file://` 直开与交互验证通道 | ✅ 已完成（2026-11-09 实测，见 §7）；ADR-001 / ADR-004 无需复议 |
 | M1 解析层 | `types.ts` + `txtParser.ts` + Vitest 解析器单测 | 3 本真实 TXT 无乱码、段落可读 |
 | M2 阅读层 | `ReaderView` + 设置 + 分块渲染 | 字号/行距/主题即时生效且重启保留 |
 | M3 进度与跳转 | `offsetIndex` + `progress` + 跳转 | 刷新恢复误差 < 1 屏、50% 跳转正确 |
@@ -203,7 +214,7 @@ npm test                                  # vitest run，脚手架建立后启�
 
 | 风险 | 对策 |
 |---|---|
-| 单文件 `file://` 加载失败 | M0 先验证；不通过则退到本地静态服务，仍不上桌面壳 |
+| 单文件 `file://` 加载失败 | M0 已实测：Chrome 单次无头 `--dump-dom` 可读；若某浏览器仍失败，退到本地静态服务，仍不上桌面壳 |
 | GBK 误判 | `fatal` 试探 + 手动切换兜底 + 真实样本压测 |
 | 编码切换导致偏移漂移 | 切换即重置进度；`encoding` 是否进 `bookId` 待评审🔍 |
 | 超大文件首屏卡死 | 2 MB 阈值 + 分块渲染，跳转前确保目标块已挂载 |
@@ -219,4 +230,4 @@ npm test                                  # vitest run，脚手架建立后启�
 
 ## 12. 交付约定
 
-遵守仓库 `AGENTS.MD`：每次改动创建一个对应 Git commit；每次改动编写或更新相关测试，交付前确保全部通过。本次交付物为本文档与 `tests/test_tech_design.py`。
+遵守仓库 `AGENTS.MD`：每次改动创建一个对应 Git commit；每次改动编写或更新相关测试，交付前确保全部通过。本次交付物为本文档与 `tests/test_tech_design.py`；实现阶段按 M1~M4 交付源码、Vitest 单测、E2E 脚本与单文件 HTML 产物。
