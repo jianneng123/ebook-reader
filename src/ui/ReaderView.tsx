@@ -50,6 +50,13 @@ export function ReaderView({
     if (pendingOffset === null) return;
     const container = containerRef.current;
     if (!container) return;
+    // 偏移 0 = 从头开始，直接回到容器顶部（标题可见）；
+    // 不用 scrollIntoView，否则会把标题滚出视口。
+    if (pendingOffset === 0) {
+      container.scrollTop = 0;
+      setPendingOffset(null);
+      return;
+    }
     const { paragraph } = locate(index, pendingOffset);
     const node = container.querySelector<HTMLElement>(`[data-paragraph="${paragraph}"]`);
     if (!node) return;

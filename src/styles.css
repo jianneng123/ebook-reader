@@ -146,3 +146,223 @@ body {
   text-align: center;
   padding: 16px 0 40vh;
 }
+
+/* ===== v0.2 书架 ===== */
+.current-book,
+.shelf-count {
+  font-size: 13px;
+  color: #666;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shelf {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 18px 24px 24px;
+}
+
+.shelf-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.shelf-hint,
+.pager-label {
+  font-size: 13px;
+  color: #777;
+}
+
+.shelf-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #888;
+  font-size: 15px;
+}
+
+.shelf-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 20px;
+  align-content: start;
+}
+
+.shelf-card {
+  position: relative;
+  padding: 10px;
+  border: 1px solid #e6e6e6;
+  border-radius: 12px;
+  background: #fff;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.shelf-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+}
+
+.shelf-open {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: center;
+}
+
+.book-cover {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  padding: 12px;
+  border-radius: 8px;
+  box-shadow: inset 0 -20px 40px rgba(0, 0, 0, 0.12), 0 3px 8px rgba(0, 0, 0, 0.12);
+  color: #fff;
+  overflow: hidden;
+}
+
+.book-cover-initial {
+  font-size: 46px;
+  font-weight: 700;
+  line-height: 1;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.book-cover-title {
+  max-width: 100%;
+  font-size: 14px;
+  letter-spacing: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.book-file-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.book-progress {
+  font-size: 12px;
+  color: #999;
+}
+
+.book-delete {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  color: #666;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.book-delete:hover {
+  background: #e54b4b;
+  border-color: #e54b4b;
+  color: #fff;
+}
+
+.shelf-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 22px 0 4px;
+}
+
+.pager-label {
+  min-width: 96px;
+  text-align: center;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 760px) {
+  .shelf-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* 暗色主题贯通书架与工具栏 */
+.app[data-theme='dark'] {
+  background: #161719;
+  color: #e4e4e6;
+}
+
+.app[data-theme='dark'] .toolbar,
+.app[data-theme='dark'] .shelf-bar,
+.app[data-theme='dark'] .progress-bar {
+  background: #202124;
+  border-color: #343538;
+}
+
+.app[data-theme='dark'] .file-picker,
+.app[data-theme='dark'] .encoding-select,
+.app[data-theme='dark'] .btn {
+  background: #2a2b2e;
+  border-color: #45464a;
+  color: #e4e4e6;
+}
+
+.app[data-theme='dark'] .btn.active {
+  background: #2f6feb;
+  border-color: #2f6feb;
+  color: #fff;
+}
+
+.app[data-theme='dark'] .shelf-hint,
+.app[data-theme='dark'] .pager-label,
+.app[data-theme='dark'] .book-progress,
+.app[data-theme='dark'] .shelf-empty,
+.app[data-theme='dark'] .current-book,
+.app[data-theme='dark'] .shelf-count,
+.app[data-theme='dark'] .empty,
+.app[data-theme='dark'] .progress-value {
+  color: #a9abb0;
+}
+
+.app[data-theme='dark'] .shelf-card {
+  background: #232427;
+  border-color: #343538;
+}
+
+.app[data-theme='dark'] .book-file-name {
+  color: #e4e4e6;
+}
+
+.app[data-theme='dark'] .notice {
+  background: #3a2f18;
+  border-color: #6b5424;
+  color: #f0d089;
+}

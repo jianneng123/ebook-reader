@@ -1,9 +1,9 @@
 /**
- * v0.1 端到端验收（PRD §5.4 / TECH_DESIGN §8）
+ * v0.2 端到端验收（PRD-v0.2 §7 / TECH_DESIGN-v0.2 §6）
  *
  * 运行：npm run test:e2e
  * 通道 A：本地 http://127.0.0.1 服务 + Playwright（复用本机 Chromium / Chrome），
- *        用 setInputFiles 绕开原生文件选择框，覆盖 F1~F6 交互。
+ *        setInputFiles 绕开原生文件选择框，IndexedDB 在此通道可用，验证多书书架。
  * 通道 B：Chrome --headless=new --dump-dom 验证单文件 file:// 产物可离线渲染。
  *
  * 刻意不使用 Playwright CLI 的 file:// 通道（实测被拦），也不依赖桌面 computer use。
@@ -58,19 +58,63 @@ async function launchBrowser() {
 }
 
 async function freshPage(browser, url, fn) {
-  const page = await browser.newPage();
+  const page = await browser.newPage(); // 每次独立 context，IndexedDB 天然隔离
   try {
     await page.goto(url);
     await page.waitForSelector('.app');
+    page.on('dialog', (dialog) => dialog.accept());
     await fn(page);
   } finally {
     await page.close();
   }
 }
 
-async function openTxt(page, name) {
-  await page.setInputFiles('input[type="file"]', resolve(fixtures, name));
+async function waitNotice(page, keyword) {
+  await page.waitForFunction(
+    (k) => (document.querySelector('.notice')?.textContent ?? '').includes(k),
+    keyword,
+    { timeout: 15_000 },
+  );
+}
+
+async function importFiles(page, files, expectedTotal, noticeKeyword = '成功导入') {
+  await page.setInputFiles('input[type="file"]', files);
+  await page.waitForFunction(
+    (total) => Number(document.querySelector('.shelf-count')?.dataset.count ?? -1) === total,
+    expectedTotal,
+    { timeout: 15_000 },
+  );
+  await waitNotice(page, noticeKeyword);
+}
+
+const txtBufferFile = (name, text) => ({
+  name,
+  mimeType: 'text/plain',
+  buffer: Buffer.from(text, 'utf-8'),
+});
+
+async function openBook(page, fileName) {
+  let card = page.locator('.shelf-card').filter({ hasText: fileName });
+  // 导入后默认停在最后一页，需要时向前翻页找目标书。
+  for (let i = 0; i < 6 && (await card.count()) === 0; i += 1) {
+    const previous = page.getByRole('button', { name: '上一页' });
+    if (await previous.isDisabled()) break;
+    await previous.click();
+    card = page.locator('.shelf-card').filter({ hasText: fileName });
+  }
+  assert.ok((await card.count()) > 0, `书架上找不到 ${fileName}`);
+  await card.first().locator('.shelf-open').click();
   await page.waitForSelector('.reader-paragraph');
+}
+
+async function openTxt(page, name) {
+  await importFiles(page, [resolve(fixtures, name)], 1);
+  await openBook(page, name);
+}
+
+async function backToShelf(page) {
+  await page.getByRole('button', { name: '← 返回书架' }).click();
+  await page.waitForSelector('.shelf');
 }
 
 function readerText() {
@@ -98,37 +142,143 @@ async function main() {
   const browser = await launchBrowser();
 
   try {
-    console.log('\n[通道 A] 本地 http + Playwright 交互验收');
+    console.log('\n[通道 A] 本地 http + Playwright 多书书架验收');
 
     await check('打开阅读器即可看到版本号（工具栏徽章 + 标签页标题）', async () => {
       await freshPage(browser, url, async (page) => {
         const badge = await page.textContent('.app-version');
         assert.equal(badge?.trim(), expectedVersionLabel, '版本徽章应与 package.json 一致');
         assert.ok(await page.isVisible('.app-version'), '版本徽章应可见');
-        assert.ok(await page.isVisible('.empty'), '未打开文件时也能看到版本号');
+        assert.ok(await page.isVisible('.shelf'), '默认进入书架主界面');
         assert.ok((await page.title()).includes(expectedVersionLabel), '标签页标题应带版本号');
       });
     });
 
+    await check('R1/R3/R8 导入 3 本互不覆盖，图标下方显示文件名', async () => {
+      await freshPage(browser, url, async (page) => {
+        await importFiles(
+          page,
+          ['utf8-novel.txt', 'utf8-bom.txt', 'gbk-novel.txt'].map((name) =>
+            resolve(fixtures, name),
+          ),
+          3,
+        );
+        assert.equal(await page.$$eval('.shelf-card', (nodes) => nodes.length), 3);
+        assert.equal(await page.$$eval('.book-cover', (nodes) => nodes.length), 3);
+        const names = await page.$$eval('.book-file-name', (nodes) =>
+          nodes.map((node) => node.textContent),
+        );
+        assert.deepEqual(
+          [...names].sort(),
+          ['utf8-novel.txt', 'utf8-bom.txt', 'gbk-novel.txt'].sort(),
+        );
+        assert.match(await page.textContent('.shelf-hint'), /共 3 本 · 最多 50 本/);
+      });
+    });
+
+    await check('R3 同一内容重复导入被去重，书架数量不变', async () => {
+      await freshPage(browser, url, async (page) => {
+        await importFiles(page, [resolve(fixtures, 'utf8-novel.txt')], 1);
+        await importFiles(page, [resolve(fixtures, 'utf8-novel.txt')], 1, '重复跳过');
+        assert.equal(await page.$eval('.shelf-count', (el) => el.dataset.count), '1');
+      });
+    });
+
+    await check('R2/R7 刷新后书架仍在，无需重新导入即可直接阅读', async () => {
+      await freshPage(browser, url, async (page) => {
+        await importFiles(
+          page,
+          [resolve(fixtures, 'utf8-novel.txt'), resolve(fixtures, 'gbk-novel.txt')],
+          2,
+        );
+        await page.reload();
+        await page.waitForSelector('.shelf-count');
+        await page.waitForFunction(
+          () => document.querySelector('.shelf-count')?.dataset.count === '2',
+        );
+        await openBook(page, 'gbk-novel.txt');
+        assert.ok((await page.evaluate(readerText)).includes('旧书店'), 'GBK 书应可直接打开');
+      });
+    });
+
+    await check('R4/R5 三本书来回切换，内容与进度各归各', async () => {
+      await freshPage(browser, url, async (page) => {
+        await importFiles(
+          page,
+          ['utf8-novel.txt', 'utf8-bom.txt', 'gbk-novel.txt'].map((name) =>
+            resolve(fixtures, name),
+          ),
+          3,
+        );
+        await openBook(page, 'utf8-novel.txt');
+        assert.ok((await page.evaluate(readerText)).includes('青石镇'));
+        await page.$eval('.reader', (el) => {
+          el.scrollTop = Math.floor(el.scrollHeight / 2);
+        });
+        await page.waitForTimeout(700); // 进度节流 400ms
+        await backToShelf(page);
+
+        await openBook(page, 'gbk-novel.txt');
+        assert.ok((await page.evaluate(readerText)).includes('旧书店'));
+        const freshScroll = await page.$eval('.reader', (el) => el.scrollTop);
+        assert.equal(freshScroll, 0, '新书应从 0 开始，不继承上一本的进度');
+        await backToShelf(page);
+
+        await openBook(page, 'utf8-novel.txt');
+        await page.waitForTimeout(400);
+        const restored = await page.$eval('.reader', (el) => el.scrollTop);
+        assert.ok(restored > 0, `切回第一本应恢复进度，实际 ${restored}`);
+      });
+    });
+
+    await check('R9 第 13 本触发第 2 页，上一页 / 下一页可用', async () => {
+      await freshPage(browser, url, async (page) => {
+        const files = Array.from({ length: 13 }, (_, i) =>
+          txtBufferFile(`书${String(i + 1).padStart(2, '0')}.txt`, `第${i + 1}本书的正文。\n\n第二段。`),
+        );
+        await importFiles(page, files, 13);
+        assert.equal(await page.$eval('.pager-label', (el) => el.dataset.page), '2');
+        assert.match(await page.textContent('.pager-label'), /第 2 \/ 2 页/);
+        assert.equal(await page.$$eval('.shelf-card', (nodes) => nodes.length), 1);
+        await page.getByRole('button', { name: '上一页' }).click();
+        assert.equal(await page.$$eval('.shelf-card', (nodes) => nodes.length), 12);
+        await page.getByRole('button', { name: '下一页' }).click();
+        assert.equal(await page.$$eval('.shelf-card', (nodes) => nodes.length), 1);
+      });
+    });
+
+    await check('R10/R11 满 50 本拒绝导入；删除一本后可再导入', async () => {
+      await freshPage(browser, url, async (page) => {
+        const files = Array.from({ length: 50 }, (_, i) =>
+          txtBufferFile(`批量${String(i + 1).padStart(2, '0')}.txt`, `第${i + 1}本内容。\n\n第二段。`),
+        );
+        await importFiles(page, files, 50);
+        const extra = txtBufferFile('第51本.txt', '第 51 本的内容。');
+        await page.setInputFiles('input[type="file"]', [extra]);
+        await waitNotice(page, '书架已满');
+        assert.equal(await page.$eval('.shelf-count', (el) => el.dataset.count), '50');
+
+        await page.locator('.shelf-card .book-delete').first().click();
+        await page.waitForFunction(
+          () => document.querySelector('.shelf-count')?.dataset.count === '49',
+        );
+        await importFiles(page, [extra], 50);
+        assert.equal(await page.$eval('.shelf-count', (el) => el.dataset.count), '50');
+      });
+    });
+
     await check('§5.4-1 三本真实中文 TXT 无乱码、段落可读', async () => {
-      const cases = [
+      for (const [name, keyword] of [
         ['utf8-novel.txt', '青石镇'],
         ['utf8-bom.txt', '旧书店'],
         ['gbk-novel.txt', '旧书店'],
-      ];
-      for (const [name, keyword] of cases) {
+      ]) {
         await freshPage(browser, url, async (page) => {
           await openTxt(page, name);
-          const info = await page.evaluate(() => ({
-            text: Array.from(document.querySelectorAll('.reader-paragraph'))
-              .map((node) => node.textContent ?? '')
-              .join(''),
-            count: document.querySelectorAll('.reader-paragraph').length,
-          }));
-          assert.ok(info.text.includes(keyword), `${name} 应包含「${keyword}」`);
-          assert.ok(!info.text.includes('\uFFFD'), `${name} 不应有替换字符`);
-          assert.ok(!info.text.includes('锟斤拷'), `${name} 不应有典型乱码`);
-          assert.ok(info.count > 1, `${name} 段落数应大于 1`);
+          const text = await page.evaluate(readerText);
+          assert.ok(text.includes(keyword), `${name} 应包含「${keyword}」`);
+          assert.ok(!text.includes('\uFFFD'), `${name} 不应有替换字符`);
+          assert.ok(!text.includes('锟斤拷'), `${name} 不应有典型乱码`);
         });
       }
     });
@@ -145,7 +295,7 @@ async function main() {
       });
     });
 
-    await check('F2 手动切换编码生效且可切回', async () => {
+    await check('F2/R6 手动切换编码生效、按书保存且可切回', async () => {
       await freshPage(browser, url, async (page) => {
         await openTxt(page, 'gbk-novel.txt');
         await page.selectOption('.encoding-select', 'utf-8');
@@ -154,12 +304,18 @@ async function main() {
         await page.selectOption('.encoding-select', 'gbk');
         const fixed = await page.evaluate(readerText);
         assert.ok(fixed.includes('旧书店') && !fixed.includes('\uFFFD'), '切回 GBK 应无乱码');
-        const notice = await page.textContent('.notice');
-        assert.match(notice ?? '', /进度已重置/);
+        await waitNotice(page, '进度已重置');
+        await backToShelf(page);
+        await openBook(page, 'gbk-novel.txt');
+        assert.equal(
+          await page.inputValue('.encoding-select'),
+          'gbk',
+          '重新打开该书应记住编码选择',
+        );
       });
     });
 
-    await check('§5.4-3 字号 / 行距 / 主题即时生效且重启保留', async () => {
+    await check('§5.4-3 字号 / 行距 / 主题即时生效、重启保留且书架贯通', async () => {
       await freshPage(browser, url, async (page) => {
         await openTxt(page, 'utf8-novel.txt');
         await page.getByRole('button', { name: '大', exact: true }).click();
@@ -167,11 +323,13 @@ async function main() {
         await page.getByRole('button', { name: '宽松行距' }).click();
         assert.equal(await page.$eval('.reader', (el) => el.style.lineHeight), '2.1');
         await page.getByRole('button', { name: '夜间' }).click();
+        assert.equal(await page.getAttribute('.app', 'data-theme'), 'dark');
         assert.equal(await page.getAttribute('.reader', 'data-theme'), 'dark');
 
         await page.reload();
         await page.waitForSelector('.app');
-        await openTxt(page, 'utf8-novel.txt');
+        assert.equal(await page.getAttribute('.app', 'data-theme'), 'dark', '书架也应保留夜间主题');
+        await openBook(page, 'utf8-novel.txt');
         assert.equal(await page.$eval('.reader', (el) => getComputedStyle(el).fontSize), '23px');
         assert.equal(await page.getAttribute('.reader', 'data-theme'), 'dark');
       });
@@ -183,15 +341,13 @@ async function main() {
         await page.$eval('.reader', (el) => {
           el.scrollTop = Math.floor(el.scrollHeight / 2);
         });
-        await page.waitForTimeout(700); // 进度节流 400ms
-        const saved = await page.evaluate(() =>
-          localStorage.getItem('reader:progress:v1'),
-        );
+        await page.waitForTimeout(700);
+        const saved = await page.evaluate(() => localStorage.getItem('reader:progress:v1'));
         assert.ok(saved && saved.includes('"type":"offset"'), '进度应写入 localStorage');
 
         await page.reload();
         await page.waitForSelector('.app');
-        await openTxt(page, 'utf8-novel.txt');
+        await openBook(page, 'utf8-novel.txt');
         await page.waitForTimeout(400);
         const scrollTop = await page.$eval('.reader', (el) => el.scrollTop);
         assert.ok(scrollTop > 0, `恢复后应回到上次位置，实际 scrollTop=${scrollTop}`);
@@ -236,7 +392,8 @@ async function main() {
         ],
         { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] },
       );
-      assert.ok(dumped.includes('选择或拖入一个 .txt 文件开始阅读'), 'JS 未执行或页面为空');
+      assert.ok(dumped.includes('我的书架'), 'JS 未执行或书架为空');
+      assert.ok(dumped.includes('导入 TXT'), '书架应有导入入口');
       assert.match(dumped, /class="app-version"/, '离线产物应含版本徽章节点');
       assert.ok(
         dumped.includes(expectedVersionLabel),

@@ -78,7 +78,13 @@ class TestPrdV02(unittest.TestCase):
 
     def test_package_version_is_semver(self):
         self.assertRegex(self.pkg["version"], r"^\d+\.\d+\.\d+$")
+        self.assertEqual(self.pkg["version"], "0.2.0")
         self.assertEqual(self.pkg["name"], "ebook-reader")
+
+    def test_docs_status_matches_delivered_state(self):
+        self.assertIn("已实现 · 已验收", self.prd)
+        self.assertIn("已落地 · 已验收", self.design)
+        self.assertIn("docs/ACCEPTANCE.md", self.prd)
 
 
 if __name__ == "__main__":
