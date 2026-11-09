@@ -86,6 +86,8 @@ async function main() {
   if (build.status !== 0) throw new Error(`npm run build 失败:\n${build.stdout}\n${build.stderr}`);
   const html = await readFile(release, 'utf-8');
   assert.ok(html.length > 10_000, '单文件产物应内联全部 JS/CSS');
+  const { version } = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf-8'));
+  const expectedVersionLabel = `v${version}`;
 
   const server = createServer((_req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -97,6 +99,16 @@ async function main() {
 
   try {
     console.log('\n[通道 A] 本地 http + Playwright 交互验收');
+
+    await check('打开阅读器即可看到版本号（工具栏徽章 + 标签页标题）', async () => {
+      await freshPage(browser, url, async (page) => {
+        const badge = await page.textContent('.app-version');
+        assert.equal(badge?.trim(), expectedVersionLabel, '版本徽章应与 package.json 一致');
+        assert.ok(await page.isVisible('.app-version'), '版本徽章应可见');
+        assert.ok(await page.isVisible('.empty'), '未打开文件时也能看到版本号');
+        assert.ok((await page.title()).includes(expectedVersionLabel), '标签页标题应带版本号');
+      });
+    });
 
     await check('§5.4-1 三本真实中文 TXT 无乱码、段落可读', async () => {
       const cases = [
@@ -189,11 +201,18 @@ async function main() {
     await check('F6 跳到 50% 位置正确', async () => {
       await freshPage(browser, url, async (page) => {
         await openTxt(page, 'utf8-novel.txt');
+        // 等恢复定位引发的滚动事件安静下来，避免它回写 value 覆盖滑块草稿值。
+        await page.waitForTimeout(200);
         await page.$eval('.progress-range', (el) => {
           el.value = '50';
           el.dispatchEvent(new Event('input', { bubbles: true }));
         });
-        await page.getByRole('button', { name: /跳到 50%/ }).click();
+        await page.waitForFunction(
+          () => document.querySelector('.progress-bar .btn')?.textContent?.includes('50%'),
+          null,
+          { timeout: 3000 },
+        );
+        await page.locator('.progress-bar .btn').click();
         await page.waitForTimeout(300);
         const scrollTop = await page.$eval('.reader', (el) => el.scrollTop);
         assert.ok(scrollTop > 0, '50% 跳转应滚动到中段');
@@ -218,6 +237,11 @@ async function main() {
         { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] },
       );
       assert.ok(dumped.includes('选择或拖入一个 .txt 文件开始阅读'), 'JS 未执行或页面为空');
+      assert.match(dumped, /class="app-version"/, '离线产物应含版本徽章节点');
+      assert.ok(
+        dumped.includes(expectedVersionLabel),
+        `离线产物应显示 ${expectedVersionLabel}`,
+      );
       assert.ok(!/<script[^>]+src=/.test(dumped), '产物不应有外链 script');
       assert.ok(!/<link[^>]+stylesheet/.test(dumped), '产物不应有外链样式');
     });

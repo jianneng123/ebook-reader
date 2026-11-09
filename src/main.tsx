@@ -13,11 +13,13 @@ import { loadSettings, saveSettings } from './store/settings';
 import { browserStorage } from './store/safeStorage';
 import { ReaderView } from './ui/ReaderView';
 import { ProgressBar } from './ui/ProgressBar';
+import { versionLabel } from './version';
 import './styles.css';
 
 const LARGE_FILE_BYTES = 2 * 1024 * 1024;
 const storage = browserStorage();
 const saver = createThrottledSaver(storage);
+document.title = `电子书阅读器 ${versionLabel()}`;
 
 type Loaded = { book: Book; meta: FileMeta; buffer: ArrayBuffer };
 
@@ -124,6 +126,9 @@ function App() {
     >
       <header class="toolbar">
         <h1 class="app-title">电子书阅读器</h1>
+        <span class="app-version" data-testid="app-version" title="构建版本，来源 package.json">
+          {versionLabel()}
+        </span>
         <label class="file-picker">
           打开 TXT
           <input
