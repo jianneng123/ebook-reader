@@ -1,0 +1,7 @@
+# WorkBuddy 本地项目数据，不纳入版本控制
+.workbuddy/
+
+# Python 测试缓存
+__pycache__/
+*.py[cod]
+.pytest_cache/
