@@ -51,7 +51,13 @@ npm run test:e2e   # Playwright + Chrome headless 端到端验收
 python -m unittest discover -s tests -v   # 文档结构与仓库约定校验
 ```
 
-`npm run test:e2e` 需要本机安装 Chrome 或 Playwright 自带 Chromium，查找路径见 `tests/e2e/run.mjs`。
+`npm run test:e2e` 需要本机安装 Chrome 或 Playwright 自带 Chromium。脚本会跨平台自动探测常见安装位置（含 Playwright 缓存目录），不写死任何机器路径；若浏览器装在非标准位置，用环境变量指定：
+
+```bash
+E2E_CHROME_PATH=/path/to/chrome npm run test:e2e
+```
+
+未安装浏览器时可执行 `npx playwright install chromium`。
 
 ## 目录结构
 

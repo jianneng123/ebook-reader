@@ -2,7 +2,8 @@
  * v0.2 端到端验收（PRD-v0.2 §7 / TECH_DESIGN-v0.2 §6）
  *
  * 运行：npm run test:e2e
- * 通道 A：本地 http://127.0.0.1 服务 + Playwright（复用本机 Chromium / Chrome），
+ * 浏览器路径由 resolveChrome() 跨平台解析；非标准安装可设 E2E_CHROME_PATH。
+ * 通道 A：本地 http://127.0.0.1 服务 + Playwright（复用 Chromium / Chrome），
  *        setInputFiles 绕开原生文件选择框，IndexedDB 在此通道可用，验证多书书架。
  * 通道 B：Chrome --headless=new --dump-dom 验证单文件 file:// 产物可离线渲染。
  *
@@ -11,17 +12,118 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { dirname, resolve } from 'node:path';
+import { homedir, platform } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const release = resolve(root, 'release/index.html');
 const fixtures = resolve(root, 'tests/fixtures');
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
+const CHROME_ENV = 'E2E_CHROME_PATH';
+
+/** Playwright 缓存里已安装的 chromium 版本目录，动态枚举，不写死版本号与用户名。 */
+function playwrightCacheCandidates() {
+  const bases = [];
+  if (process.env.PLAYWRIGHT_BROWSERS_PATH) bases.push(process.env.PLAYWRIGHT_BROWSERS_PATH);
+  if (platform() === 'win32') {
+    if (process.env.LOCALAPPDATA) bases.push(join(process.env.LOCALAPPDATA, 'ms-playwright'));
+  } else if (platform() === 'darwin') {
+    bases.push(join(homedir(), 'Library/Caches/ms-playwright'));
+  } else {
+    bases.push(join(homedir(), '.cache/ms-playwright'));
+  }
+
+  const relative =
+    platform() === 'win32'
+      ? join('chrome-win', 'chrome.exe')
+      : platform() === 'darwin'
+        ? join('chrome-mac', 'Chromium.app', 'Contents', 'MacOS', 'Chromium')
+        : join('chrome-linux', 'chrome');
+
+  const found = [];
+  for (const base of bases) {
+    if (!existsSync(base)) continue;
+    try {
+      for (const entry of readdirSync(base)) {
+        if (!entry.startsWith('chromium-')) continue;
+        const candidate = join(base, entry, relative);
+        if (existsSync(candidate)) found.push(candidate);
+      }
+    } catch {
+      // 缓存目录不可读时跳过，继续尝试其他来源。
+    }
+  }
+  return found;
+}
+
+/** 各平台 Chrome / Chromium 常见安装位置，只依赖环境变量与系统约定路径。 */
+function systemCandidates() {
+  const os = platform();
+  if (os === 'win32') {
+    const paths = [];
+    for (const variable of ['ProgramFiles', 'ProgramFiles(x86)']) {
+      const base = process.env[variable];
+      if (base) paths.push(join(base, 'Google', 'Chrome', 'Application', 'chrome.exe'));
+    }
+    if (process.env.LOCALAPPDATA) {
+      paths.push(join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'));
+    }
+    return paths;
+  }
+  if (os === 'darwin') {
+    return ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'];
+  }
+  return [
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+  ];
+}
+
+let cachedChrome = null;
+
+/**
+ * 解析浏览器可执行文件：环境变量 > Playwright 自带 > 缓存目录 > 系统安装位置。
+ * 不写死任何本机用户名或盘符，便于他人 clone 后直接跑 E2E。
+ */
+function resolveChrome() {
+  if (cachedChrome) return cachedChrome;
+  const fromEnv = process.env[CHROME_ENV];
+  if (fromEnv) {
+    if (!existsSync(fromEnv)) {
+      throw new Error(`${CHROME_ENV} 指向的文件不存在：${fromEnv}`);
+    }
+    cachedChrome = fromEnv;
+    return cachedChrome;
+  }
+
+  try {
+    const fromPlaywright = chromium.executablePath();
+    if (fromPlaywright && existsSync(fromPlaywright)) {
+      cachedChrome = fromPlaywright;
+      return cachedChrome;
+    }
+  } catch {
+    // playwright-core 未安装浏览器时继续探测。
+  }
+
+  for (const candidate of [...playwrightCacheCandidates(), ...systemCandidates()]) {
+    if (existsSync(candidate)) {
+      cachedChrome = candidate;
+      return cachedChrome;
+    }
+  }
+
+  throw new Error(
+    `找不到 Chrome/Chromium。请安装浏览器，或设置 ${CHROME_ENV}=<可执行文件路径>，` +
+      '也可执行 npx playwright install chromium。',
+  );
+}
 
 const results = [];
 async function check(name, fn) {
@@ -36,25 +138,24 @@ async function check(name, fn) {
 }
 
 async function launchBrowser() {
-  const candidates = [
-    'C:/Users/gj137/AppData/Local/ms-playwright/chromium-1243/chrome-win/chrome.exe',
-    'C:/Users/gj137/AppData/Local/ms-playwright/chromium-1234/chrome-win/chrome.exe',
-    CHROME,
-  ];
-  let lastError;
-  for (const executablePath of candidates) {
-    if (!existsSync(executablePath)) continue;
+  const executablePath = resolveChrome();
+  try {
+    return await chromium.launch({
+      executablePath,
+      headless: true,
+      args: ['--no-sandbox', '--disable-gpu'],
+    });
+  } catch (error) {
+    // 显式路径启动失败时，最后交给 Playwright 自己解析，避免单点失败。
     try {
       return await chromium.launch({
-        executablePath,
         headless: true,
         args: ['--no-sandbox', '--disable-gpu'],
       });
-    } catch (error) {
-      lastError = error;
+    } catch {
+      throw new Error(`无法启动 Chromium/Chrome（${executablePath}）：${error.message}`);
     }
   }
-  throw new Error(`没有可用的 Chromium/Chrome：${lastError?.message ?? '未找到可执行文件'}`);
 }
 
 async function freshPage(browser, url, fn) {
@@ -381,7 +482,7 @@ async function main() {
     await check('单文件 file:// 直开能渲染且无外链资源', async () => {
       const fileUrl = pathToFileURL(release).href;
       const dumped = execFileSync(
-        CHROME,
+        resolveChrome(),
         [
           '--headless=new',
           '--disable-gpu',
